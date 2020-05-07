@@ -84,14 +84,6 @@ function Add-IntoEventHub {
     Invoke-RestMethod -Uri $parsedURIEventHub -Method POST -Body $json -Headers $headers
 }
 
-function Calculate-SquareMeterage {
-    param (
-        
-    )
-    
-}
-
-
 # Pull data from zoopla
 $queries = foreach ($postcode in $searchLocations.GetEnumerator()) {
     New-ZooplaQueryString -postcode  $postcode.Key -radius $postcode.Value -staticInputParams $staticInputParams
