@@ -72,13 +72,14 @@ function Get-Squaremeterage {
         $datePattern = '(\d*\.?\d+)m'
         $results = $line | Select-String $datePattern -AllMatches
         if ($results) {
-            $valx = $results.Matches.Value[0].Replace("m", "")
-            $valy = $results.Matches.Value[1].Replace("m", "")
-            write-host "x is $valx, and y is $valy"
+            [single]$valx = $results.Matches.Value[0].Replace("m", "")
+            [single]$valy = $results.Matches.Value[1].Replace("m", "")
+            [single]$totalsize = $valx * $valy
+            $totalsize = [math]::Round($totalsize)
+            $housesize = $housesize + $totalsize
         }
     }
-    return $results
-
+    return $housesize
 }
 Get-Squaremeterage -description $testdesc
 
