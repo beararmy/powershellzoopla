@@ -60,52 +60,30 @@ function Update-ZooplaResult {
     )
     
 }
-
-
-
-
-function Get-Squaremeterage {
+function Get-SquareMeterage {
     param (
-        $result
+        [parameter(Mandatory = $true)]
+        [string]$result
     )
     ForEach ($line in $($testdesc -split "`r`n")) {
-        $datePattern = '(\d*\.?\d+)m'
-        $results = $line | Select-String $datePattern -AllMatches
+        $simplemetresregex = '(\d*\.?\d+)m'
+        $results = $line | Select-String $simplemetresregex -AllMatches
         if ($results) {
             [single]$valx = $results.Matches.Value[0].Replace("m", "")
             [single]$valy = $results.Matches.Value[1].Replace("m", "")
             [single]$totalsize = $valx * $valy
-            $totalsize = [math]::Round($totalsize)
-            $housesize = $housesize + $totalsize
+            [int]$totalsize = [math]::Round($totalsize)
+            [int]$housesize = $housesize + $totalsize
         }
     }
-    return $housesize
+    if ($housesize -lt 250 -and $housesize -gt 50) {
+        # Outside of these numbers we likely made a mistake
+        return $housesize
+    }
+    else {
+        return $false
+    }
 }
-Get-Squaremeterage -description $testdesc
-
-
-$testdesc = "Living Room (13' 0'' x 15' 0'' (3.95m x 4.57m))
-Dining Room (15' 9'' x 13' 6'' (4.79m x 4.11m))
-Kitchen (12' 11'' x 9' 10'' (3.94m x 3.00m))
-Utility Room (9' 2'' x 9' 10'' (2.79m x 3.0m))
-Shower Room (6' 4'' x 4' 8'' (1.93m x 1.41m))
-Landing
-Bedroom 1 (13' 4'' x 14' 1'' (4.07m x 4.29m))
-Double Room
-Bedroom 2 (13' 9'' x 13' 9'' (4.18m x 4.19m))
-Double Room
-Bedroom 3 (8' 7'' x 9' 10'' (2.62m x 3.00m))
-Single Room
-Bedroom 4 (9' 9'' x 6' 4'' (2.98m x 1.93m))
-Single Room
-Bathroom (8' 4'' x 6' 5'' (2.55m x 1.95m))
-Landing
-Bedroom 5 (14' 7'' x 10' 2'' (4.44m x 3.11m))
-Double Room
-Bedroom 6 / Loft Room (20' 5'' x 18' 11'' (6.22m x 5.76m))"
-
-
-
 function Add-IntoEventHub {
     param (
         [object]$propertyToNotify
@@ -129,22 +107,22 @@ function Add-IntoEventHub {
     $headers.Add("Host", 'stefzoopla.servicebus.windows.net')
     Invoke-RestMethod -Uri $parsedURIEventHub -Method POST -Body $json -Headers $headers
 }
-
 # Pull data from zoopla
-$queries = foreach ($postcode in $searchLocations.GetEnumerator()) {
+foreach ($postcode in $searchLocations.GetEnumerator()) {
     New-ZooplaQueryString -postcode  $postcode.Key -radius $postcode.Value -staticInputParams $staticInputParams
 }
-
 # Make-a web-a request-a :italianhand:
 foreach ($query in $queries) {
     Invoke-RestMethod -Method GET -Uri $query
 }
-
 # Clean up the dodgy Zoopla data
 foreach ($result in $results) {
     Update-ZooplaResult -inputResult $result
 }
-
+# Feed in the long form description to see if we can munge the total sq meterage
+foreach ($result in $results) {
+    Get-SquareMeterage -description $testdesc
+}
 # Clean up the dodgy Zoopla data
 foreach ($property in $propertyToNotify) {
     Add-IntoEventHub -propertyToNotify $property
