@@ -25,7 +25,6 @@ $staticInputParams = @{
 $rightmoveSearchLocations = @{
     "USERDEFINEDAREA%5E%7B%22polylines%22%3A%22utd%7BHddeQly%40_fBdTe%7CFsnAgn%40rQowDrnAj_A%60%7C%40ykJwhE_gS_dAv_CgDrjD%7B%7BA%7Ci%40kbJaeT_gIoqT~nEqdGhzBnqEvdJuzUdaBmyNg%7B%40whTggKr%7CHscBciGuAqhPslH%7DpCsIwkJ~k%40%7D%7BPtpHjfD%7CiReAvwMs%60_%40jpRem%5DpaFykJ%60_H_fBhrHlvHd%5Cnhg%40ljL%60jUrcOtbVzoIxqT%60dAr%7CDrsAskAbpF%60_EljEfoA%7Bb%40rxGu%7CCbxLjaAjwRnqKuhBtkQngS%60~FliIa%7C%40ztMuy%40t%7BQdwC%60rIvtE%7CmMppGqsCxbGdoQteGvm%60%40inH%60fe%40u%7BA%7C%7DIgtDvX_vB%7BpCeiNe~%5CypO%60l%40czMz%7DBwfCwrWcOivW%7DlU_VyiE%7BxKspDvgBsxDc~MgpPo_%60%40_oAgoIuiEe_B%7BjB%60dJ%7CiGpwTbmAzkSr%7CCfqvAajDahA%7D%60BwzMkaDqF%7B~A~sEoiE%7CRufBsgBmYecEhkCg~Dv%60B%7DiBv%5E%7B%7D%40inCoWa%7DFv%7BAq%7CBs%7BCzLmqFtHaxMf%7DQqhCsiEejMeqd%40j%7DAsdEdiSkrBicV~%7B%40ogJfiAnyCn%7BC%7Bi%40%22%7D%22" = "0.0"
 }
-
 $rightmoveStaticInputParams = @{
     channel                    = "BUY"
     minPrice                   = 200000
@@ -118,8 +117,35 @@ function Add-IntoEventHub {
     Invoke-RestMethod -Uri $parsedURIEventHub -Method POST -Body $json -Headers $headers
 }
 
+function Get-RightmovePropertyIDs {
+    param (
+        [parameter(Mandatory = $true)]
+        [ValidateNotNull()]
+        [string]$query
+    )
+    $useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36"
+    $data = Invoke-WebRequest -Uri $query -UserAgent $useragent
+
+    # Scrape the number of results from the top of the page
+    [Int]$numberOfReportedResults = (($data.ParsedHtml.getElementsByTagName('span') | Where-Object { $_.getAttributeNode('class').Value -eq "searchHeader-resultCount" }).textContent)
+
+    # Process these to get property ID's for further munging
+    $step0 = $data.ParsedHtml.getElementsByTagName('div') | Where-Object { $_.getAttributeNode('data-test').Value -match "propertyCard-[0-9]" -and $_.getAttributeNode('class').Value -notlike "*is-hidden" }
+    $step1 = $step0.getElementsByTagName('a') | Where-Object { $_.getAttributeNode('class').Value -eq "propertyCard-anchor" }
+    $propertyIDs = $step1.id.Replace("prop", "")
+    $propertyIDs = $propertyIDs | Sort-Object | Get-Unique
+    
+    if ($propertyIDs.Count -ne $numberOfReportedResults) {
+        Write-Error "Mismatch on reported results vs detected results, error or [currently] >1 page (25) results."
+        return $false
+    }
+    else {
+        return $propertyIDs
+    }
+}
+
 # create query string for zoopla
-$queries = foreach ($postcode in $searchLocations.GetEnumerator()) {
+$zooplaQueries = foreach ($postcode in $searchLocations.GetEnumerator()) {
     New-ZooplaQueryString -postcode  $postcode.Key -radius $postcode.Value -staticInputParams $staticInputParams
 }
 
@@ -128,9 +154,19 @@ $rightmoveQueries = foreach ($location in $rightmoveSearchLocations.GetEnumerato
     New-RightmoveQueryString -searchTerm $location.Key -radius $location.Value -rightmoveStaticInputParams $rightmoveStaticInputParams
 }
 
-# Make-a web-a request-a :italianhand:
-foreach ($query in $queries) {
+# Make-a web-a request-a to-a zoopla :italianhand:
+$zooplaResults = foreach ($query in $zooplaQueries) {
     Invoke-RestMethod -Method GET -Uri $query
+}
+
+# Make-a web-a request-a to-a rightmove :italianhand:
+# Probably don't want to do this given we're scraping. Ideally only do one pull and munge internally.
+# $rightmoveResults = foreach ($query in $rightmoveQueries) {
+#     Invoke-RestMethod -Method GET -Uri $query
+# }
+
+foreach ($query in $rightmoveQueries) {
+    Get-RightmovePropertyIDs -query $query
 }
 
 # Clean up the dodgy Zoopla data
