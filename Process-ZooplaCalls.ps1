@@ -140,15 +140,6 @@ function Add-IntoEventHub {
     $headers.Add("Host", 'stefzoopla.servicebus.windows.net')
     Invoke-RestMethod -Uri $parsedURIEventHub -Method POST -Body $json -Headers $headers
 }
-# Pull data from zoopla
-foreach ($postcode in $searchLocations.GetEnumerator()) {
-    New-ZooplaQueryString -postcode  $postcode.Key -radius $postcode.Value -staticInputParams $staticInputParams
-}
-# Make-a web-a request-a :italianhand:
-foreach ($query in $queries) {
-    Invoke-RestMethod -Method GET -Uri $query
-}
-=======
 function Get-RightmovePropertyIDs {
     param (
         [parameter(Mandatory = $true)]
@@ -245,6 +236,7 @@ if ($propertyDetails) {
 }
 
 }
+
 # create query string for zoopla
 $zooplaQueries = foreach ($postcode in $searchLocations.GetEnumerator()) {
     New-ZooplaQueryString -postcode  $postcode.Key -radius $postcode.Value -staticInputParams $staticInputParams
@@ -260,12 +252,6 @@ $zooplaResults = foreach ($query in $zooplaQueries) {
     Invoke-RestMethod -Method GET -Uri $query
 }
 
-# Make-a web-a request-a to-a rightmove :italianhand:
-# Probably don't want to do this given we're scraping. Ideally only do one pull and munge internally.
-# $rightmoveResults = foreach ($query in $rightmoveQueries) {
-#     Invoke-RestMethod -Method GET -Uri $query
-# }
-
 [Object]$propertyIDs = foreach ($query in $rightmoveQueries) {
     Get-RightmovePropertyIDs -query $query
 }
@@ -278,10 +264,12 @@ $data = foreach ($propertyID in $propertyIDs) {
 foreach ($result in $results) {
     Update-ZooplaResult -inputResult $result
 }
+
 # Feed in the long form description to see if we can munge the total sq meterage
 foreach ($result in $results) {
     Get-SquareMeterage -description $testdesc
 }
+
 # Clean up the dodgy Zoopla data
 foreach ($property in $propertyToNotify) {
     Add-IntoEventHub -propertyToNotify $property
