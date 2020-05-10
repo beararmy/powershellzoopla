@@ -116,7 +116,6 @@ function Add-IntoEventHub {
     $headers.Add("Host", 'stefzoopla.servicebus.windows.net')
     Invoke-RestMethod -Uri $parsedURIEventHub -Method POST -Body $json -Headers $headers
 }
-
 function Get-RightmovePropertyIDs {
     param (
         [parameter(Mandatory = $true)]
@@ -143,7 +142,76 @@ function Get-RightmovePropertyIDs {
         return $propertyIDs
     }
 }
+function Get-RightmovePropertyDetail {
+    param (
+        [int]$propertyID
+    )
+    Write-Verbose "Checking details for: $propertyID"
+    $useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36"
+    $uri = $config.rightmove.URIbase + "property-" + $propertyID + ".html"
+    $data = Invoke-WebRequest -Uri $uri -UserAgent $useragent
+    $property = $data.ParsedHtml.getElementsByTagName('div') | Where-Object { $_.getAttributeNode('id').Value -eq "primaryContent" }
+    $galleryImageRegex = '(?i)src="(.*?)"'
+    $priceRegex = '[^0-9]'
+    
+    # Things to return
+    [string]$displayable_address = ($property.getElementsByTagName('meta') | Where-Object { $_.getAttributeNode('itemprop').Value -eq "streetAddress" }).content
+    [int]$num_bedrooms = (($property.getElementsByTagName('h1') | Where-Object { $_.getAttributeNode('itemprop').Value -eq "name" }).innerText).SubString(0, 1)
+    [string]$price = ($property.getElementsByTagName('p') | Where-Object { $_.getAttributeNode('id').Value -eq "propertyHeaderPrice" }).outerText
+    $price = $price -replace $priceRegex, ''
+    [int32]$price = $price
+    [DateTime]$last_published_date	 = ($property.getElementsByTagName('div') | Where-Object { $_.getAttributeNode('id').Value -eq "firstListedDateValue" }).outerText
+    [string]$property_type = switch -Wildcard ( ($property.getElementsByTagName('h1') | Where-Object { $_.getAttributeNode('itemprop').Value -eq "name" }).innerText ) {
+        '*terraced*' { "Terraced" }
+        '*end of terrace*' {  "End of terrace" }
+        '*semi-detached*' {  "Semi-detached" }
+        '*detatched*' {  "Detached" }
+        '*cottage*' {  "Cottage" }
+        '*town house*' {  "Town house" }
+        default { "Property" }
+    }  
+    [string]$price_modifier = ($property.getElementsByTagName('small') | Where-Object { $_.getAttributeNode('class').Value -eq "property-header-qualifier" }).outerText
+    [string]$details_url = $uri
+    [int]$listing_id = $propertyID
+    [string]$description = ($property.getElementsByTagName('p') | Where-Object { $_.getAttributeNode('itemprop').Value -eq "description" }).outerText
+    if (!$description) {
+        [string]$description = ($property.getElementsByTagName('div') | Where-Object { $_.getAttributeNode('class').Value -eq "sect" }).outerText.Replace("`r`n", "")
+    }
+    [string]$status = "for_sale"
+    [string]$listing_status = "sale"
+    [string]$floor_plan = ($property.getElementsByTagName('div') | Where-Object { $_.getAttributeNode('class').Value -eq "zoomableimagewrapper" }).innerHTML
+    $floor_plan = ([regex]$galleryImageRegex ).Matches($floor_plan) |  ForEach-Object { $_.Groups[1].Value }
+    [string]$image_url = ($property.getElementsByTagName('img') | Where-Object { $_.getAttributeNode('class').Value -eq "js-gallery-main" }).href
+    [string]$thumbnail_url = ($property.getElementsByTagName('a') | Where-Object { $_.getAttributeNode('id').Value -eq "thumbnail-0" }).innerHTML
+    $thumbnail_url = ([regex]$galleryImageRegex ).Matches($thumbnail_url) |  ForEach-Object { $_.Groups[1].Value }
+    [string]$short_description = $description.Substring(0,255) + "..."
 
+    $propertyDetails = [PSCustomObject]@{
+        displayable_address = $displayable_address
+        num_bedrooms        = $num_bedrooms
+        price               = $price
+        last_published_date = $last_published_date
+        property_type       = $property_type
+        price_modifier      = $price_modifier
+        details_url         = $details_url
+        listing_id          = $listing_id
+        description         = $description
+        status              = $status
+        listing_status      = $listing_status
+        floor_plan          = $floor_plan
+        image_url           = $image_url
+        thumbnail_url       = $thumbnail_url
+        short_description   = $short_description
+    }
+
+if ($propertyDetails) {
+    return $propertyDetails
+} else {
+    Write-Error "No details to return"
+    return $false
+}
+
+}
 # create query string for zoopla
 $zooplaQueries = foreach ($postcode in $searchLocations.GetEnumerator()) {
     New-ZooplaQueryString -postcode  $postcode.Key -radius $postcode.Value -staticInputParams $staticInputParams
@@ -165,8 +233,12 @@ $zooplaResults = foreach ($query in $zooplaQueries) {
 #     Invoke-RestMethod -Method GET -Uri $query
 # }
 
-foreach ($query in $rightmoveQueries) {
+[Object]$propertyIDs = foreach ($query in $rightmoveQueries) {
     Get-RightmovePropertyIDs -query $query
+}
+
+$data = foreach ($propertyID in $propertyIDs) {
+    Get-RightmovePropertyDetail -propertyID $propertyID
 }
 
 # Clean up the dodgy Zoopla data
