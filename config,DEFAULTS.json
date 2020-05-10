@@ -1,14 +1,18 @@
 {
-    "eventhub":  {
-                 "saskey": "xxx=",
-                 "sasname": "xxx",
-                 "eventhuburi": "https://xxx.servicebus.windows.net/xxx",
-                 "servicebusNamespace": "xxx",
-                 "eventhubpath": "xxx"
-             },
-    "zoopla":  {
-                   "apikey" : "xxx",
-                   "URIbase" : "http://api.zoopla.co.uk/api/v1/",
-                   "URItypepage" : "property_listings.json"
-               }
+    "eventhub": {
+        "saskey": "xxx=",
+        "sasname": "xxx",
+        "eventhuburi": "https://xxx.servicebus.windows.net/xxx",
+        "servicebusNamespace": "xxx",
+        "eventhubpath": "xxx"
+    },
+    "zoopla": {
+        "apikey": "xxx",
+        "URIbase": "http://api.zoopla.co.uk/api/v1/",
+        "URItypepage": "property_listings.json"
+    },
+    "rightmove": {
+        "URIbase": "https://www.rightmove.co.uk/property-for-sale/",
+        "URItypepage": "find.html"
+    }
 }
