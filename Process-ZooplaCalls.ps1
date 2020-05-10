@@ -22,6 +22,20 @@ $staticInputParams = @{
     new_homes      = "true"
     page_size      = "100"
 }
+$rightmoveSearchLocations = @{
+    "USERDEFINEDAREA%5E%7B%22polylines%22%3A%22utd%7BHddeQly%40_fBdTe%7CFsnAgn%40rQowDrnAj_A%60%7C%40ykJwhE_gS_dAv_CgDrjD%7B%7BA%7Ci%40kbJaeT_gIoqT~nEqdGhzBnqEvdJuzUdaBmyNg%7B%40whTggKr%7CHscBciGuAqhPslH%7DpCsIwkJ~k%40%7D%7BPtpHjfD%7CiReAvwMs%60_%40jpRem%5DpaFykJ%60_H_fBhrHlvHd%5Cnhg%40ljL%60jUrcOtbVzoIxqT%60dAr%7CDrsAskAbpF%60_EljEfoA%7Bb%40rxGu%7CCbxLjaAjwRnqKuhBtkQngS%60~FliIa%7C%40ztMuy%40t%7BQdwC%60rIvtE%7CmMppGqsCxbGdoQteGvm%60%40inH%60fe%40u%7BA%7C%7DIgtDvX_vB%7BpCeiNe~%5CypO%60l%40czMz%7DBwfCwrWcOivW%7DlU_VyiE%7BxKspDvgBsxDc~MgpPo_%60%40_oAgoIuiEe_B%7BjB%60dJ%7CiGpwTbmAzkSr%7CCfqvAajDahA%7D%60BwzMkaDqF%7B~A~sEoiE%7CRufBsgBmYecEhkCg~Dv%60B%7DiBv%5E%7B%7D%40inCoWa%7DFv%7BAq%7CBs%7BCzLmqFtHaxMf%7DQqhCsiEejMeqd%40j%7DAsdEdiSkrBicV~%7B%40ogJfiAnyCn%7BC%7Bi%40%22%7D%22" = "0.0"
+}
+$rightmoveStaticInputParams = @{
+    channel                    = "BUY"
+    minPrice                   = 200000
+    maxPrice                   = 325000
+    minBedrooms                = 4
+    primaryDisplayPropertyType = "houses"
+    maxDaysSinceAdded          = 7
+    mustHave                   = ""
+    dontShow                   = "retirement"
+    keywords                   = ""
+}
 $propertyToPass = @{
     details_url         = "https://www.zoopla.co.uk/for-sale/details/53059231?search_identifier=bf48d80f2d2e2e60c125170fe380aa89"
     num_bedrooms        = "4"
@@ -32,6 +46,25 @@ $propertyToPass = @{
     last_published_date = "2020-01-01 11:22:33"
 } 
 $propertyToNotify = $propertyToPass | ConvertTo-Json
+function New-RightmoveQueryString {
+    param (
+        [parameter(Mandatory = $true)]
+        [string]$searchTerm,
+        
+        [parameter(Mandatory = $true)]
+        [ValidateRange(0, 40)]
+        [single]$radius,
+
+        [parameter(Mandatory = $true)]
+        [object]$rightmoveStaticInputParams
+    )
+    $string = "?locationIdentifier=" + $searchTerm + "&radius=" + $radius
+    foreach ($staticparam in $rightmoveStaticInputParams.GetEnumerator()) {
+        $string = $string + "&" + $staticparam.Name + "=" + $staticparam.Value
+    }
+    $qryString = $config.rightmove.URIbase + $config.rightmove.URItypepage + $string
+    return $qryString
+}
 function New-ZooplaQueryString {
     param (
         [parameter(Mandatory = $true)]
@@ -115,6 +148,132 @@ foreach ($postcode in $searchLocations.GetEnumerator()) {
 foreach ($query in $queries) {
     Invoke-RestMethod -Method GET -Uri $query
 }
+=======
+function Get-RightmovePropertyIDs {
+    param (
+        [parameter(Mandatory = $true)]
+        [ValidateNotNull()]
+        [string]$query
+    )
+    $useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36"
+    $data = Invoke-WebRequest -Uri $query -UserAgent $useragent
+
+    # Scrape the number of results from the top of the page
+    [Int]$numberOfReportedResults = (($data.ParsedHtml.getElementsByTagName('span') | Where-Object { $_.getAttributeNode('class').Value -eq "searchHeader-resultCount" }).textContent)
+
+    # Process these to get property ID's for further munging
+    $step0 = $data.ParsedHtml.getElementsByTagName('div') | Where-Object { $_.getAttributeNode('data-test').Value -match "propertyCard-[0-9]" -and $_.getAttributeNode('class').Value -notlike "*is-hidden" }
+    $step1 = $step0.getElementsByTagName('a') | Where-Object { $_.getAttributeNode('class').Value -eq "propertyCard-anchor" }
+    $propertyIDs = $step1.id.Replace("prop", "")
+    $propertyIDs = $propertyIDs | Sort-Object | Get-Unique
+    
+    if ($propertyIDs.Count -ne $numberOfReportedResults) {
+        Write-Error "Mismatch on reported results vs detected results, error or [currently] >1 page (25) results."
+        return $false
+    }
+    else {
+        return $propertyIDs
+    }
+}
+function Get-RightmovePropertyDetail {
+    param (
+        [int]$propertyID
+    )
+    Write-Verbose "Checking details for: $propertyID"
+    $useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36"
+    $uri = $config.rightmove.URIbase + "property-" + $propertyID + ".html"
+    $data = Invoke-WebRequest -Uri $uri -UserAgent $useragent
+    $property = $data.ParsedHtml.getElementsByTagName('div') | Where-Object { $_.getAttributeNode('id').Value -eq "primaryContent" }
+    $galleryImageRegex = '(?i)src="(.*?)"'
+    $priceRegex = '[^0-9]'
+    
+    # Things to return
+    [string]$displayable_address = ($property.getElementsByTagName('meta') | Where-Object { $_.getAttributeNode('itemprop').Value -eq "streetAddress" }).content
+    [int]$num_bedrooms = (($property.getElementsByTagName('h1') | Where-Object { $_.getAttributeNode('itemprop').Value -eq "name" }).innerText).SubString(0, 1)
+    [string]$price = ($property.getElementsByTagName('p') | Where-Object { $_.getAttributeNode('id').Value -eq "propertyHeaderPrice" }).outerText
+    $price = $price -replace $priceRegex, ''
+    [int32]$price = $price
+    [DateTime]$last_published_date	 = ($property.getElementsByTagName('div') | Where-Object { $_.getAttributeNode('id').Value -eq "firstListedDateValue" }).outerText
+    [string]$property_type = switch -Wildcard ( ($property.getElementsByTagName('h1') | Where-Object { $_.getAttributeNode('itemprop').Value -eq "name" }).innerText ) {
+        '*terraced*' { "Terraced" }
+        '*end of terrace*' {  "End of terrace" }
+        '*semi-detached*' {  "Semi-detached" }
+        '*detatched*' {  "Detached" }
+        '*cottage*' {  "Cottage" }
+        '*town house*' {  "Town house" }
+        default { "Property" }
+    }  
+    [string]$price_modifier = ($property.getElementsByTagName('small') | Where-Object { $_.getAttributeNode('class').Value -eq "property-header-qualifier" }).outerText
+    [string]$details_url = $uri
+    [int]$listing_id = $propertyID
+    [string]$description = ($property.getElementsByTagName('p') | Where-Object { $_.getAttributeNode('itemprop').Value -eq "description" }).outerText
+    if (!$description) {
+        [string]$description = ($property.getElementsByTagName('div') | Where-Object { $_.getAttributeNode('class').Value -eq "sect" }).outerText.Replace("`r`n", "")
+    }
+    [string]$status = "for_sale"
+    [string]$listing_status = "sale"
+    [string]$floor_plan = ($property.getElementsByTagName('div') | Where-Object { $_.getAttributeNode('class').Value -eq "zoomableimagewrapper" }).innerHTML
+    $floor_plan = ([regex]$galleryImageRegex ).Matches($floor_plan) |  ForEach-Object { $_.Groups[1].Value }
+    [string]$image_url = ($property.getElementsByTagName('img') | Where-Object { $_.getAttributeNode('class').Value -eq "js-gallery-main" }).href
+    [string]$thumbnail_url = ($property.getElementsByTagName('a') | Where-Object { $_.getAttributeNode('id').Value -eq "thumbnail-0" }).innerHTML
+    $thumbnail_url = ([regex]$galleryImageRegex ).Matches($thumbnail_url) |  ForEach-Object { $_.Groups[1].Value }
+    [string]$short_description = $description.Substring(0,255) + "..."
+
+    $propertyDetails = [PSCustomObject]@{
+        displayable_address = $displayable_address
+        num_bedrooms        = $num_bedrooms
+        price               = $price
+        last_published_date = $last_published_date
+        property_type       = $property_type
+        price_modifier      = $price_modifier
+        details_url         = $details_url
+        listing_id          = $listing_id
+        description         = $description
+        status              = $status
+        listing_status      = $listing_status
+        floor_plan          = $floor_plan
+        image_url           = $image_url
+        thumbnail_url       = $thumbnail_url
+        short_description   = $short_description
+    }
+
+if ($propertyDetails) {
+    return $propertyDetails
+} else {
+    Write-Error "No details to return"
+    return $false
+}
+
+}
+# create query string for zoopla
+$zooplaQueries = foreach ($postcode in $searchLocations.GetEnumerator()) {
+    New-ZooplaQueryString -postcode  $postcode.Key -radius $postcode.Value -staticInputParams $staticInputParams
+}
+
+# create query string for rightmove
+$rightmoveQueries = foreach ($location in $rightmoveSearchLocations.GetEnumerator()) {
+    New-RightmoveQueryString -searchTerm $location.Key -radius $location.Value -rightmoveStaticInputParams $rightmoveStaticInputParams
+}
+
+# Make-a web-a request-a to-a zoopla :italianhand:
+$zooplaResults = foreach ($query in $zooplaQueries) {
+    Invoke-RestMethod -Method GET -Uri $query
+}
+
+# Make-a web-a request-a to-a rightmove :italianhand:
+# Probably don't want to do this given we're scraping. Ideally only do one pull and munge internally.
+# $rightmoveResults = foreach ($query in $rightmoveQueries) {
+#     Invoke-RestMethod -Method GET -Uri $query
+# }
+
+[Object]$propertyIDs = foreach ($query in $rightmoveQueries) {
+    Get-RightmovePropertyIDs -query $query
+}
+
+$data = foreach ($propertyID in $propertyIDs) {
+    Get-RightmovePropertyDetail -propertyID $propertyID
+}
+
 # Clean up the dodgy Zoopla data
 foreach ($result in $results) {
     Update-ZooplaResult -inputResult $result
