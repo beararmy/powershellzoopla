@@ -93,6 +93,30 @@ function Update-ZooplaResult {
     )
     
 }
+function Get-SquareMeterage {
+    param (
+        [parameter(Mandatory = $true)]
+        [string]$result
+    )
+    ForEach ($line in $($testdesc -split "`r`n")) {
+        $simplemetresregex = '(\d*\.?\d+)m'
+        $results = $line | Select-String $simplemetresregex -AllMatches
+        if ($results) {
+            [single]$valx = $results.Matches.Value[0].Replace("m", "")
+            [single]$valy = $results.Matches.Value[1].Replace("m", "")
+            [single]$totalsize = $valx * $valy
+            [int]$totalsize = [math]::Round($totalsize)
+            [int]$housesize = $housesize + $totalsize
+        }
+    }
+    if ($housesize -lt 250 -and $housesize -gt 50) {
+        # Outside of these numbers we likely made a mistake
+        return $housesize
+    }
+    else {
+        return $false
+    }
+}
 function Add-IntoEventHub {
     param (
         [object]$propertyToNotify
@@ -116,6 +140,15 @@ function Add-IntoEventHub {
     $headers.Add("Host", 'stefzoopla.servicebus.windows.net')
     Invoke-RestMethod -Uri $parsedURIEventHub -Method POST -Body $json -Headers $headers
 }
+# Pull data from zoopla
+foreach ($postcode in $searchLocations.GetEnumerator()) {
+    New-ZooplaQueryString -postcode  $postcode.Key -radius $postcode.Value -staticInputParams $staticInputParams
+}
+# Make-a web-a request-a :italianhand:
+foreach ($query in $queries) {
+    Invoke-RestMethod -Method GET -Uri $query
+}
+=======
 function Get-RightmovePropertyIDs {
     param (
         [parameter(Mandatory = $true)]
@@ -245,7 +278,10 @@ $data = foreach ($propertyID in $propertyIDs) {
 foreach ($result in $results) {
     Update-ZooplaResult -inputResult $result
 }
-
+# Feed in the long form description to see if we can munge the total sq meterage
+foreach ($result in $results) {
+    Get-SquareMeterage -description $testdesc
+}
 # Clean up the dodgy Zoopla data
 foreach ($property in $propertyToNotify) {
     Add-IntoEventHub -propertyToNotify $property
