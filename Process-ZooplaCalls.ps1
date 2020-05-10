@@ -22,6 +22,21 @@ $staticInputParams = @{
     new_homes      = "true"
     page_size      = "100"
 }
+$rightmoveSearchLocations = @{
+    "USERDEFINEDAREA%5E%7B%22polylines%22%3A%22utd%7BHddeQly%40_fBdTe%7CFsnAgn%40rQowDrnAj_A%60%7C%40ykJwhE_gS_dAv_CgDrjD%7B%7BA%7Ci%40kbJaeT_gIoqT~nEqdGhzBnqEvdJuzUdaBmyNg%7B%40whTggKr%7CHscBciGuAqhPslH%7DpCsIwkJ~k%40%7D%7BPtpHjfD%7CiReAvwMs%60_%40jpRem%5DpaFykJ%60_H_fBhrHlvHd%5Cnhg%40ljL%60jUrcOtbVzoIxqT%60dAr%7CDrsAskAbpF%60_EljEfoA%7Bb%40rxGu%7CCbxLjaAjwRnqKuhBtkQngS%60~FliIa%7C%40ztMuy%40t%7BQdwC%60rIvtE%7CmMppGqsCxbGdoQteGvm%60%40inH%60fe%40u%7BA%7C%7DIgtDvX_vB%7BpCeiNe~%5CypO%60l%40czMz%7DBwfCwrWcOivW%7DlU_VyiE%7BxKspDvgBsxDc~MgpPo_%60%40_oAgoIuiEe_B%7BjB%60dJ%7CiGpwTbmAzkSr%7CCfqvAajDahA%7D%60BwzMkaDqF%7B~A~sEoiE%7CRufBsgBmYecEhkCg~Dv%60B%7DiBv%5E%7B%7D%40inCoWa%7DFv%7BAq%7CBs%7BCzLmqFtHaxMf%7DQqhCsiEejMeqd%40j%7DAsdEdiSkrBicV~%7B%40ogJfiAnyCn%7BC%7Bi%40%22%7D%22" = "0.0"
+}
+
+$rightmoveStaticInputParams = @{
+    channel                    = "BUY"
+    minPrice                   = 200000
+    maxPrice                   = 325000
+    minBedrooms                = 4
+    primaryDisplayPropertyType = "houses"
+    maxDaysSinceAdded          = 7
+    mustHave                   = ""
+    dontShow                   = "retirement"
+    keywords                   = ""
+}
 $propertyToPass = @{
     details_url         = "https://www.zoopla.co.uk/for-sale/details/53059231?search_identifier=bf48d80f2d2e2e60c125170fe380aa89"
     num_bedrooms        = "4"
@@ -32,6 +47,25 @@ $propertyToPass = @{
     last_published_date = "2020-01-01 11:22:33"
 } 
 $propertyToNotify = $propertyToPass | ConvertTo-Json
+function New-RightmoveQueryString {
+    param (
+        [parameter(Mandatory = $true)]
+        [string]$searchTerm,
+        
+        [parameter(Mandatory = $true)]
+        [ValidateRange(0, 40)]
+        [single]$radius,
+
+        [parameter(Mandatory = $true)]
+        [object]$rightmoveStaticInputParams
+    )
+    $string = "?locationIdentifier=" + $searchTerm + "&radius=" + $radius
+    foreach ($staticparam in $rightmoveStaticInputParams.GetEnumerator()) {
+        $string = $string + "&" + $staticparam.Name + "=" + $staticparam.Value
+    }
+    $qryString = $config.rightmove.URIbase + $config.rightmove.URItypepage + $string
+    return $qryString
+}
 function New-ZooplaQueryString {
     param (
         [parameter(Mandatory = $true)]
@@ -84,9 +118,14 @@ function Add-IntoEventHub {
     Invoke-RestMethod -Uri $parsedURIEventHub -Method POST -Body $json -Headers $headers
 }
 
-# Pull data from zoopla
+# create query string for zoopla
 $queries = foreach ($postcode in $searchLocations.GetEnumerator()) {
     New-ZooplaQueryString -postcode  $postcode.Key -radius $postcode.Value -staticInputParams $staticInputParams
+}
+
+# create query string for rightmove
+$rightmoveQueries = foreach ($location in $rightmoveSearchLocations.GetEnumerator()) {
+    New-RightmoveQueryString -searchTerm $location.Key -radius $location.Value -rightmoveStaticInputParams $rightmoveStaticInputParams
 }
 
 # Make-a web-a request-a :italianhand:
